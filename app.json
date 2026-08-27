@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Antigravity",
+    "slug": "antigravity",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hiuc5454.sign.2025",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Ứng dụng cần quyền Camera để quét mã QR Remote Control kết nối với Agent.",
+        "NSMicrophoneUsageDescription": "Cho phép ghi âm nếu bạn muốn gửi tin nhắn thoại đến Agent.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "UIRequiresFullScreen": false
+      }
+    },
+    "android": {
+      "package": "com.antigravity.remote",
+      "adaptiveIcon": {
+        "backgroundColor": "#0d1117",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.WAKE_LOCK"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Cho phép ứng dụng sử dụng camera để quét mã QR Remote Control."
+        }
+      ]
+    ]
+  }
+}
