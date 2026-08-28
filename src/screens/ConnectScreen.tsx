@@ -26,8 +26,11 @@ import {
   ShieldCheck,
   Smartphone,
   CheckCircle2,
+  Cloud,
+  RefreshCw,
 } from 'lucide-react-native';
 import { QRScannerModal } from '../components/QRScannerModal';
+import { BackupModal } from '../components/BackupModal';
 import { StorageService } from '../services/StorageService';
 import { RemoteDevice, AppSettings } from '../types';
 
@@ -45,6 +48,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
     desktopMode: false,
   });
   const [scannerVisible, setScannerVisible] = useState(false);
+  const [backupModalVisible, setBackupModalVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -60,17 +64,51 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
       setDevices(storedDevices);
       setSettings(storedSettings);
     } catch (e) {
-      console.error('Error loading initial data:', e);
+      console.error('Error loading data:', e);
     }
   };
 
-  const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Medium) => {
-    try {
-      if (settings.hapticFeedback) {
+  const triggerHaptic = (style = Haptics.ImpactFeedbackStyle.Light) => {
+    if (settings.hapticFeedback) {
+      try {
         Haptics.impactAsync(style);
+      } catch {
+        // Ignore
       }
-    } catch {
-      // Ignore
+    }
+  };
+
+  const handleScanSuccess = async (scannedText: string) => {
+    setScannerVisible(false);
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+
+    const clean = scannedText.trim();
+
+    // If scanned a Backup QR Code
+    if (clean.startsWith('AG_BACKUP:v1:')) {
+      try {
+        const importRes = await StorageService.importBackup(clean);
+        await loadData();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Khôi phục thành công! 🎉', `Đã phục hồi ${importRes.devicesCount} thiết bị từ mã QR.`);
+        return;
+      } catch (e: any) {
+        Alert.alert('Lỗi mã sao lưu', e.message);
+        return;
+      }
+    }
+
+    try {
+      const parsed = StorageService.parseRemoteInput(clean);
+      const savedDevice = await StorageService.saveDevice({
+        name: parsed.deviceName || 'Remote Server',
+        url: parsed.url,
+      });
+
+      await loadData();
+      onConnect(savedDevice);
+    } catch (e) {
+      Alert.alert('Lỗi', 'Không thể lưu thiết bị này.');
     }
   };
 
@@ -80,18 +118,36 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
       return;
     }
 
+    const clean = rawInput.trim();
+
+    // Check if user pasted a backup string
+    if (clean.startsWith('AG_BACKUP:v1:')) {
+      try {
+        triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+        const importRes = await StorageService.importBackup(clean);
+        await loadData();
+        setInputUrl('');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Khôi phục thành công! 🎉', `Đã phục hồi ${importRes.devicesCount} thiết bị từ mã sao lưu.`);
+        return;
+      } catch (e: any) {
+        Alert.alert('Lỗi mã sao lưu', e.message || 'Không thể giải mã dữ liệu.');
+        return;
+      }
+    }
+
     triggerHaptic();
     setLoading(true);
 
     try {
-      const parsed = StorageService.parseRemoteInput(rawInput);
+      const parsed = StorageService.parseRemoteInput(clean);
       const savedDevice = await StorageService.saveDevice({
         name: customName || parsed.deviceName,
         url: parsed.url,
       });
 
       // Reload devices list in background
-      loadData();
+      await loadData();
       onConnect(savedDevice);
     } catch (e: any) {
       Alert.alert('Lỗi kết nối', e.message || 'Không thể lưu thông tin kết nối.');
@@ -105,7 +161,15 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
     try {
       const text = await Clipboard.getStringAsync();
       if (text && text.trim()) {
-        setInputUrl(text.trim());
+        const clean = text.trim();
+        setInputUrl(clean);
+        if (clean.startsWith('AG_BACKUP:v1:')) {
+          Alert.alert(
+            'Phát hiện mã sao lưu 📋',
+            'Bạn vừa dán mã sao lưu dữ liệu. Nhấn "Kết nối ngay" để khôi phục lại toàn bộ danh sách thiết bị!',
+            [{ text: 'Đồng ý' }]
+          );
+        }
       } else {
         Alert.alert('Bộ nhớ tạm trống', 'Hãy sao chép link Remote Control trước khi dán.');
       }
@@ -114,38 +178,54 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
     }
   };
 
-  const handleScanSuccess = (scannedData: string) => {
-    setInputUrl(scannedData);
-    handleConnectWithUrl(scannedData);
-  };
-
   const handleDeleteDevice = (id: string, name: string) => {
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Heavy);
-    Alert.alert('Xoá thiết bị', `Bạn có chắc muốn xoá "${name}" khỏi lịch sử?`, [
-      { text: 'Huỷ', style: 'cancel' },
-      {
-        text: 'Xoá',
-        style: 'destructive',
-        onPress: async () => {
-          await StorageService.deleteDevice(id);
-          loadData();
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert(
+      'Xóa thiết bị',
+      `Bạn có chắc chắn muốn xóa "${name}" khỏi lịch sử kết nối không?`,
+      [
+        { text: 'Hủy', style: 'cancel' },
+        {
+          text: 'Xóa',
+          style: 'destructive',
+          onPress: async () => {
+            await StorageService.deleteDevice(id);
+            await loadData();
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleToggleAutoConnect = async (value: boolean) => {
-    triggerHaptic(Haptics.ImpactFeedbackStyle.Light);
+    triggerHaptic();
     const updated = await StorageService.saveSettings({ autoConnectLastDevice: value });
     setSettings(updated);
   };
 
+  const handleToggleKeepAwake = async (value: boolean) => {
+    triggerHaptic();
+    const updated = await StorageService.saveSettings({ keepAwakeEnabled: value });
+    setSettings(updated);
+  };
+
+  const handleToggleHaptic = async (value: boolean) => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch {}
+    const updated = await StorageService.saveSettings({ hapticFeedback: value });
+    setSettings(updated);
+  };
+
   const formatTimeAgo = (timestamp: number) => {
-    const diff = Math.floor((Date.now() - timestamp) / 1000);
-    if (diff < 60) return 'Vừa xong';
-    if (diff < 3600) return `${Math.floor(diff / 60)} phút trước`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} giờ trước`;
-    return `${Math.floor(diff / 86400)} ngày trước`;
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'Vừa mới xong';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} phút trước`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} giờ trước`;
+    const days = Math.floor(hours / 24);
+    return `${days} ngày trước`;
   };
 
   return (
@@ -166,7 +246,21 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 <Sparkles color="#00f2fe" size={13} />
                 <Text style={styles.statusBadgeText}>AI Remote Client</Text>
               </View>
+
+              {/* Backup & Cloud Sync Header Button */}
+              <TouchableOpacity
+                style={styles.headerBackupBtn}
+                onPress={() => {
+                  triggerHaptic();
+                  setBackupModalVisible(true);
+                }}
+                activeOpacity={0.8}
+              >
+                <Cloud color="#00f2fe" size={14} />
+                <Text style={styles.headerBackupBtnText}>Sao lưu & Khôi phục</Text>
+              </TouchableOpacity>
             </View>
+
             <Text style={styles.mainTitle}>Antigravity Remote</Text>
             <Text style={styles.subtitle}>
               Điều khiển & tương tác trực tiếp với Agent trên màn hình iPhone
@@ -196,11 +290,11 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
 
           {/* Manual Input Card */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Hoặc dán Link / Device Name</Text>
+            <Text style={styles.cardTitle}>Hoặc dán Link / Device Name / Mã sao lưu</Text>
             <View style={styles.inputContainer}>
               <TextInput
                 style={styles.textInput}
-                placeholder="win-1vlvsl2a1b9-... hoặc https://..."
+                placeholder="win-1vlvsl2a1b9-..., https://... hoặc AG_BACKUP:..."
                 placeholderTextColor="#64748b"
                 value={inputUrl}
                 onChangeText={setInputUrl}
@@ -218,53 +312,45 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
 
             <TouchableOpacity
               style={[
-                styles.connectBtn,
-                !inputUrl.trim() ? styles.connectBtnDisabled : null,
+                styles.primaryButton,
+                !inputUrl.trim() && styles.disabledButton,
               ]}
               onPress={() => handleConnectWithUrl(inputUrl)}
               disabled={!inputUrl.trim() || loading}
               activeOpacity={0.8}
             >
-              <Text style={styles.connectBtnText}>
-                {loading ? 'Đang kết nối...' : 'Kết nối ngay'}
+              <Text style={styles.primaryButtonText}>
+                {inputUrl.trim().startsWith('AG_BACKUP:v1:') ? 'Khôi phục dữ liệu ngay' : 'Kết nối ngay'}
               </Text>
-              <ArrowRight color="#ffffff" size={18} />
             </TouchableOpacity>
           </View>
 
-          {/* Preferences Box */}
-          <View style={styles.settingsCard}>
-            <View style={styles.settingsRow}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.settingLabel}>Tự động kết nối lại</Text>
-                <Text style={styles.settingDesc}>
-                  Mở app là vào thẳng phiên làm việc gần nhất
-                </Text>
-              </View>
-              <Switch
-                value={settings.autoConnectLastDevice}
-                onValueChange={handleToggleAutoConnect}
-                trackColor={{ false: '#334155', true: '#0284c7' }}
-                thumbColor={settings.autoConnectLastDevice ? '#38bdf8' : '#94a3b8'}
-              />
-            </View>
-          </View>
+          {/* Recent Devices History */}
+          {devices.length > 0 ? (
+            <View style={styles.historySection}>
+              <View style={styles.historyHeader}>
+                <View style={styles.historyTitleRow}>
+                  <Server color="#94a3b8" size={16} />
+                  <Text style={styles.sectionTitle}>Lịch sử thiết bị ({devices.length})</Text>
+                </View>
 
-          {/* Saved / Recent Devices */}
-          {devices.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <View style={styles.sectionHeader}>
-                <Server color="#38bdf8" size={18} />
-                <Text style={styles.sectionTitle}>Thiết bị đã lưu ({devices.length})</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    triggerHaptic();
+                    setBackupModalVisible(true);
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text style={styles.quickBackupLink}>Sao lưu đám mây</Text>
+                </TouchableOpacity>
               </View>
 
               {devices.map((device) => (
                 <View key={device.id} style={styles.deviceItem}>
                   <TouchableOpacity
-                    style={styles.deviceInfoArea}
+                    style={styles.deviceTouchable}
                     onPress={() => {
                       triggerHaptic();
-                      StorageService.setLastConnectedDevice(device);
                       onConnect(device);
                     }}
                     activeOpacity={0.7}
@@ -295,7 +381,78 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 </View>
               ))}
             </View>
+          ) : (
+            /* Empty State with Cloud Restore Prompt */
+            <TouchableOpacity
+              style={styles.restorePromptCard}
+              onPress={() => {
+                triggerHaptic();
+                setBackupModalVisible(true);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.restorePromptIcon}>
+                <Cloud color="#00f2fe" size={24} />
+              </View>
+              <View style={styles.restorePromptTextContainer}>
+                <Text style={styles.restorePromptTitle}>Đã cài lại app hoặc đổi máy?</Text>
+                <Text style={styles.restorePromptDesc}>
+                  Nhấn vào đây để tải lại toàn bộ lịch sử đăng nhập từ Đám mây!
+                </Text>
+              </View>
+              <ArrowRight color="#00f2fe" size={18} />
+            </TouchableOpacity>
           )}
+
+          {/* Settings Section */}
+          <View style={styles.settingsSection}>
+            <Text style={styles.sectionTitle}>Tùy chọn ứng dụng</Text>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingLabel}>Tự động kết nối lần sau</Text>
+                <Text style={styles.settingDesc}>
+                  Tự động mở máy tính kết nối gần nhất khi khởi động app
+                </Text>
+              </View>
+              <Switch
+                value={settings.autoConnectLastDevice}
+                onValueChange={handleToggleAutoConnect}
+                trackColor={{ false: '#334155', true: '#0284c7' }}
+                thumbColor={settings.autoConnectLastDevice ? '#38bdf8' : '#94a3b8'}
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingLabel}>Giữ màn hình luôn sáng</Text>
+                <Text style={styles.settingDesc}>
+                  Không tự tắt màn hình khi đang trong phiên điều khiển
+                </Text>
+              </View>
+              <Switch
+                value={settings.keepAwakeEnabled}
+                onValueChange={handleToggleKeepAwake}
+                trackColor={{ false: '#334155', true: '#0284c7' }}
+                thumbColor={settings.keepAwakeEnabled ? '#38bdf8' : '#94a3b8'}
+              />
+            </View>
+
+            <View style={styles.settingItem}>
+              <View style={styles.settingTextContainer}>
+                <Text style={styles.settingLabel}>Rung phản hồi (Haptics)</Text>
+                <Text style={styles.settingDesc}>
+                  Tạo cảm giác rung nhẹ khi nhấn nút hoặc quét mã thành công
+                </Text>
+              </View>
+              <Switch
+                value={settings.hapticFeedback}
+                onValueChange={handleToggleHaptic}
+                trackColor={{ false: '#334155', true: '#0284c7' }}
+                thumbColor={settings.hapticFeedback ? '#38bdf8' : '#94a3b8'}
+              />
+            </View>
+          </View>
 
           {/* Quick Guide */}
           <View style={styles.guideCard}>
@@ -318,7 +475,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
             <View style={styles.stepRow}>
               <CheckCircle2 color="#38bdf8" size={15} style={styles.stepIcon} />
               <Text style={styles.stepText}>
-                3. App sẽ ghi nhớ thiết bị để lần sau bạn không cần quét lại nữa!
+                3. Bật <Text style={styles.bold}>Sao lưu đám mây</Text> để không bao giờ bị mất danh sách thiết bị khi cài lại app!
               </Text>
             </View>
           </View>
@@ -330,6 +487,13 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
         visible={scannerVisible}
         onClose={() => setScannerVisible(false)}
         onScanSuccess={handleScanSuccess}
+      />
+
+      {/* Backup & Restore Modal */}
+      <BackupModal
+        visible={backupModalVisible}
+        onClose={() => setBackupModalVisible(false)}
+        onDataRestored={loadData}
       />
     </SafeAreaView>
   );
@@ -351,6 +515,8 @@ const styles = StyleSheet.create({
   },
   badgeRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 10,
   },
   statusBadge: {
@@ -358,7 +524,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(0, 242, 254, 0.12)',
     paddingVertical: 5,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(0, 242, 254, 0.3)',
@@ -368,11 +534,27 @@ const styles = StyleSheet.create({
     color: '#00f2fe',
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: 0.5,
+  },
+  headerBackupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+    gap: 6,
+  },
+  headerBackupBtnText: {
+    color: '#00f2fe',
+    fontSize: 12,
+    fontWeight: '700',
   },
   mainTitle: {
     fontSize: 28,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#ffffff',
     letterSpacing: -0.5,
     marginBottom: 6,
@@ -390,16 +572,16 @@ const styles = StyleSheet.create({
     padding: 18,
     marginBottom: 20,
     shadowColor: '#00f2fe',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
     elevation: 8,
   },
   scanIconContainer: {
     width: 52,
     height: 52,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    backgroundColor: 'rgba(3, 7, 18, 0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
@@ -415,21 +597,22 @@ const styles = StyleSheet.create({
   },
   scanCardSubtitle: {
     fontSize: 12,
-    color: '#1e293b',
+    color: 'rgba(3, 7, 18, 0.75)',
+    lineHeight: 16,
     fontWeight: '500',
   },
   card: {
     backgroundColor: '#131b2e',
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    marginBottom: 16,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 24,
   },
   cardTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#f8fafc',
+    color: '#cbd5e1',
     marginBottom: 12,
   },
   inputContainer: {
@@ -451,72 +634,58 @@ const styles = StyleSheet.create({
   pasteButton: {
     padding: 8,
   },
-  connectBtn: {
+  primaryButton: {
     backgroundColor: '#2563eb',
     borderRadius: 14,
     paddingVertical: 14,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
-  connectBtnDisabled: {
+  disabledButton: {
     backgroundColor: '#1e293b',
     opacity: 0.6,
   },
-  connectBtnText: {
+  primaryButtonText: {
     color: '#ffffff',
     fontSize: 15,
     fontWeight: '700',
   },
-  settingsCard: {
-    backgroundColor: '#131b2e',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    marginBottom: 20,
+  historySection: {
+    marginBottom: 24,
   },
-  settingsRow: {
+  historyHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 12,
   },
-  settingLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#f1f5f9',
-    marginBottom: 2,
-  },
-  settingDesc: {
-    fontSize: 12,
-    color: '#94a3b8',
-  },
-  sectionContainer: {
-    marginBottom: 22,
-  },
-  sectionHeader: {
+  historyTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#cbd5e1',
+    fontWeight: '800',
+    color: '#f8fafc',
+    letterSpacing: 0.2,
+  },
+  quickBackupLink: {
+    fontSize: 13,
+    color: '#38bdf8',
+    fontWeight: '600',
   },
   deviceItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#131b2e',
     borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 12,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  deviceInfoArea: {
+  deviceTouchable: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -525,7 +694,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: 'rgba(0, 242, 254, 0.12)',
+    backgroundColor: 'rgba(0, 242, 254, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
@@ -536,8 +705,8 @@ const styles = StyleSheet.create({
   deviceName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#f8fafc',
-    marginBottom: 4,
+    color: '#ffffff',
+    marginBottom: 2,
   },
   deviceMetaRow: {
     flexDirection: 'row',
@@ -545,48 +714,111 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   deviceTime: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#64748b',
   },
   deleteBtn: {
     padding: 8,
     marginLeft: 6,
   },
-  guideCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.4)',
-    borderRadius: 16,
+  restorePromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+    borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(0, 242, 254, 0.25)',
+    marginBottom: 24,
+    gap: 12,
+  },
+  restorePromptIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 242, 254, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  restorePromptTextContainer: {
+    flex: 1,
+  },
+  restorePromptTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#f8fafc',
+    marginBottom: 2,
+  },
+  restorePromptDesc: {
+    fontSize: 12,
+    color: '#94a3b8',
+    lineHeight: 16,
+  },
+  settingsSection: {
+    backgroundColor: '#131b2e',
+    borderRadius: 20,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 24,
+  },
+  settingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  settingTextContainer: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  settingLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#f8fafc',
+    marginBottom: 2,
+  },
+  settingDesc: {
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  guideCard: {
+    backgroundColor: 'rgba(19, 27, 46, 0.5)',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.04)',
   },
   guideHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   guideTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#4ade80',
+    color: '#22c55e',
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginTop: 8,
+    marginBottom: 8,
   },
   stepIcon: {
-    marginRight: 8,
     marginTop: 2,
+    marginRight: 8,
   },
   stepText: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 13,
     color: '#94a3b8',
     lineHeight: 18,
   },
   bold: {
-    color: '#f1f5f9',
+    color: '#f8fafc',
     fontWeight: '700',
   },
 });
