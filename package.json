@@ -1,12 +1,13 @@
 {
   "name": "antigravity-ios",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.17",
     "expo-camera": "~57.0.4",
     "expo-clipboard": "~57.0.1",
+    "expo-file-system": "~57.0.6",
     "expo-haptics": "~57.0.2",
     "expo-keep-awake": "~57.0.1",
     "expo-status-bar": "~57.0.1",

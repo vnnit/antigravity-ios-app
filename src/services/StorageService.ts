@@ -1,11 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { File, Paths } from 'expo-file-system';
 import { RemoteDevice, AppSettings, BackupData } from '../types';
 
 const STORAGE_KEYS = {
   DEVICES: '@antigravity_devices_v1',
   LAST_CONNECTED: '@antigravity_last_device_v1',
   SETTINGS: '@antigravity_settings_v1',
-  LOCAL_BACKUP: '@antigravity_local_backup_v1',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -15,33 +15,70 @@ const DEFAULT_SETTINGS: AppSettings = {
   desktopMode: false,
 };
 
+const BACKUP_FILENAME = 'antigravity_history.json';
 const BACKUP_PREFIX = 'AG_BACKUP:v1:';
 
-const toBase64 = (str: string): string => {
-  try {
-    return btoa(unescape(encodeURIComponent(str)));
-  } catch {
-    return encodeURIComponent(str);
-  }
-};
-
-const fromBase64 = (str: string): string => {
-  try {
-    return decodeURIComponent(escape(atob(str)));
-  } catch {
-    return decodeURIComponent(str);
-  }
+const getBackupFile = () => {
+  return new File(Paths.document, BACKUP_FILENAME);
 };
 
 export const StorageService = {
+  /**
+   * Automatically synchronizes between AsyncStorage and the local "On My iPhone > Antigravity" folder (antigravity_history.json)
+   */
   async getDevices(): Promise<RemoteDevice[]> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEYS.DEVICES);
-      if (!data) return [];
-      const parsed: RemoteDevice[] = JSON.parse(data);
-      return parsed.sort((a, b) => b.lastConnectedAt - a.lastConnectedAt);
+      let devicesFromAsync: RemoteDevice[] = [];
+      const asyncData = await AsyncStorage.getItem(STORAGE_KEYS.DEVICES);
+      if (asyncData) {
+        devicesFromAsync = JSON.parse(asyncData);
+      }
+
+      // Check the local Files folder (antigravity_history.json)
+      let devicesFromFile: RemoteDevice[] = [];
+      try {
+        const file = getBackupFile();
+        if (file.exists) {
+          const fileContent = await file.text();
+          if (fileContent) {
+            const parsed = JSON.parse(fileContent);
+            if (Array.isArray(parsed)) {
+              devicesFromFile = parsed;
+            } else if (parsed && Array.isArray(parsed.devices)) {
+              devicesFromFile = parsed.devices;
+            }
+          }
+        }
+      } catch (fileErr) {
+        console.warn('Could not read from local Files directory:', fileErr);
+      }
+
+      // Merge both sources (deduplicating by url/id)
+      const deviceMap = new Map<string, RemoteDevice>();
+      for (const d of devicesFromFile) {
+        if (d && d.url) deviceMap.set(d.url, d);
+      }
+      for (const d of devicesFromAsync) {
+        if (d && d.url) deviceMap.set(d.url, d);
+      }
+
+      const mergedDevices = Array.from(deviceMap.values()).sort(
+        (a, b) => b.lastConnectedAt - a.lastConnectedAt
+      );
+
+      // If file had devices that AsyncStorage lost (e.g. after reinstall), persist back to AsyncStorage
+      if (mergedDevices.length > 0 && devicesFromAsync.length !== mergedDevices.length) {
+        await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(mergedDevices));
+      }
+
+      // If file was missing, save merged to file
+      if (mergedDevices.length > 0 && devicesFromFile.length !== mergedDevices.length) {
+        this.saveToFileSystem(mergedDevices).catch(() => {});
+      }
+
+      return mergedDevices;
     } catch (e) {
-      console.error('Failed to get devices from storage:', e);
+      console.error('Failed to get devices:', e);
       return [];
     }
   },
@@ -79,8 +116,12 @@ export const StorageService = {
         newDevices = [updatedDevice, ...devices];
       }
 
+      // 1. Save to AsyncStorage
       await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(newDevices));
       await this.setLastConnectedDevice(updatedDevice);
+
+      // 2. Automatically save file to "On My iPhone > Antigravity" folder
+      await this.saveToFileSystem(newDevices);
 
       return updatedDevice;
     } catch (e) {
@@ -99,6 +140,9 @@ export const StorageService = {
       if (lastDevice && lastDevice.id === id) {
         await AsyncStorage.removeItem(STORAGE_KEYS.LAST_CONNECTED);
       }
+
+      // Update local file
+      await this.saveToFileSystem(filtered);
     } catch (e) {
       console.error('Failed to delete device:', e);
     }
@@ -147,6 +191,43 @@ export const StorageService = {
   },
 
   /**
+   * Save devices payload directly to iOS "On My iPhone > Antigravity" folder (antigravity_history.json)
+   */
+  async saveToFileSystem(devices: RemoteDevice[]): Promise<string> {
+    try {
+      const file = getBackupFile();
+      const payload: BackupData = {
+        version: 1,
+        exportedAt: Date.now(),
+        devices,
+        settings: await this.getSettings(),
+        lastConnectedDevice: await this.getLastConnectedDevice(),
+      };
+      await file.write(JSON.stringify(payload, null, 2));
+      return file.uri;
+    } catch (e) {
+      console.error('Failed to write to FileSystem:', e);
+      return '';
+    }
+  },
+
+  /**
+   * Reload and restore data directly from the iOS Files app folder (antigravity_history.json)
+   */
+  async restoreFromFileSystem(): Promise<{ devicesCount: number; path: string }> {
+    const file = getBackupFile();
+    if (!file.exists) {
+      throw new Error(`Chưa tìm thấy file "${BACKUP_FILENAME}" trong thư mục Antigravity trên iPhone.`);
+    }
+
+    const content = await file.text();
+    const parsed = JSON.parse(content);
+    const result = await this.importBackup(parsed);
+
+    return { devicesCount: result.devicesCount, path: file.uri };
+  },
+
+  /**
    * Export all devices & settings to a portable backup JSON
    */
   async exportBackupPayload(): Promise<BackupData> {
@@ -166,26 +247,43 @@ export const StorageService = {
   },
 
   /**
-   * Export backup as a Base64 code string for 1-click copying to Notes / Clipboard
+   * Export backup as a Base64 code string for quick copying
    */
   async exportBackupString(): Promise<string> {
     const payload = await this.exportBackupPayload();
     const jsonStr = JSON.stringify(payload);
-    const base64 = toBase64(jsonStr);
+    let base64 = '';
+    try {
+      base64 = btoa(unescape(encodeURIComponent(jsonStr)));
+    } catch {
+      base64 = encodeURIComponent(jsonStr);
+    }
     return `${BACKUP_PREFIX}${base64}`;
   },
 
   /**
-   * Import backup from JSON string or Base64 code string
+   * Import backup from JSON object or string
    */
-  async importBackup(input: string | BackupData): Promise<{ devicesCount: number }> {
+  async importBackup(input: string | BackupData | RemoteDevice[]): Promise<{ devicesCount: number }> {
     let data: BackupData;
 
-    if (typeof input === 'string') {
+    if (Array.isArray(input)) {
+      data = {
+        version: 1,
+        exportedAt: Date.now(),
+        devices: input,
+        settings: DEFAULT_SETTINGS,
+      };
+    } else if (typeof input === 'string') {
       let clean = input.trim();
       if (clean.startsWith(BACKUP_PREFIX)) {
         clean = clean.substring(BACKUP_PREFIX.length);
-        const jsonStr = fromBase64(clean);
+        let jsonStr = '';
+        try {
+          jsonStr = decodeURIComponent(escape(atob(clean)));
+        } catch {
+          jsonStr = decodeURIComponent(clean);
+        }
         data = JSON.parse(jsonStr);
       } else {
         data = JSON.parse(clean);
@@ -195,19 +293,16 @@ export const StorageService = {
     }
 
     if (!data.devices || !Array.isArray(data.devices)) {
-      throw new Error('Dữ liệu sao lưu không hợp lệ (không tìm thấy danh sách thiết bị).');
+      throw new Error('Dữ liệu không hợp lệ (không tìm thấy danh sách thiết bị).');
     }
 
-    // Merge with existing devices
     const currentDevices = await this.getDevices();
     const deviceMap = new Map<string, RemoteDevice>();
 
-    // Put current first
     for (const d of currentDevices) {
-      deviceMap.set(d.url, d);
+      if (d && d.url) deviceMap.set(d.url, d);
     }
 
-    // Overlay imported
     for (const d of data.devices) {
       if (d && d.url) {
         deviceMap.set(d.url, {
@@ -225,6 +320,7 @@ export const StorageService = {
     );
 
     await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(mergedDevices));
+    await this.saveToFileSystem(mergedDevices);
 
     if (data.lastConnectedDevice && data.lastConnectedDevice.url) {
       await this.setLastConnectedDevice(data.lastConnectedDevice);
@@ -243,7 +339,6 @@ export const StorageService = {
   parseRemoteInput(input: string): { url: string; deviceName: string } {
     let cleanInput = input.trim();
 
-    // Check if input is a Backup string
     if (cleanInput.startsWith(BACKUP_PREFIX)) {
       return {
         url: cleanInput,
@@ -251,7 +346,6 @@ export const StorageService = {
       };
     }
 
-    // Check if input is JSON
     if (cleanInput.startsWith('{') && cleanInput.endsWith('}')) {
       try {
         const parsed = JSON.parse(cleanInput);
@@ -266,7 +360,6 @@ export const StorageService = {
       }
     }
 
-    // If input is standard URL
     if (cleanInput.startsWith('http://') || cleanInput.startsWith('https://')) {
       let deviceName = 'Remote Agent';
       try {
@@ -283,7 +376,6 @@ export const StorageService = {
       return { url: cleanInput, deviceName };
     }
 
-    // If user entered IP:PORT or domain:port without protocol
     if (/^[a-zA-Z0-9.-]+:[0-9]+(\/.*)?$/.test(cleanInput)) {
       return {
         url: `http://${cleanInput}`,
@@ -291,7 +383,6 @@ export const StorageService = {
       };
     }
 
-    // If it looks like a device ID e.g. "win-1vlvsl2a1b9-mighty-corona"
     return {
       url: `https://antigravity.google.com/remote?device=${encodeURIComponent(cleanInput)}`,
       deviceName: cleanInput,

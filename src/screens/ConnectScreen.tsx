@@ -26,8 +26,7 @@ import {
   ShieldCheck,
   Smartphone,
   CheckCircle2,
-  HardDrive,
-  Copy,
+  Folder,
 } from 'lucide-react-native';
 import { QRScannerModal } from '../components/QRScannerModal';
 import { BackupModal } from '../components/BackupModal';
@@ -247,7 +246,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 <Text style={styles.statusBadgeText}>AI Remote Client</Text>
               </View>
 
-              {/* Local Backup Header Button */}
+              {/* Local Files Header Button */}
               <TouchableOpacity
                 style={styles.headerBackupBtn}
                 onPress={() => {
@@ -256,8 +255,8 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 }}
                 activeOpacity={0.8}
               >
-                <HardDrive color="#00f2fe" size={14} />
-                <Text style={styles.headerBackupBtnText}>Sao lưu Offline</Text>
+                <Folder color="#00f2fe" size={14} />
+                <Text style={styles.headerBackupBtnText}>Tệp lưu trữ (Files)</Text>
               </TouchableOpacity>
             </View>
 
@@ -341,7 +340,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={styles.quickBackupLink}>Sao lưu ra Notes</Text>
+                  <Text style={styles.quickBackupLink}>Quản lý Tệp (Files)</Text>
                 </TouchableOpacity>
               </View>
 
@@ -382,7 +381,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
               ))}
             </View>
           ) : (
-            /* Empty State with Quick Restore Prompt */
+            /* Empty State with Files Restore Prompt */
             <TouchableOpacity
               style={styles.restorePromptCard}
               onPress={() => {
@@ -392,12 +391,12 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
               activeOpacity={0.8}
             >
               <View style={styles.restorePromptIcon}>
-                <HardDrive color="#00f2fe" size={24} />
+                <Folder color="#00f2fe" size={24} />
               </View>
               <View style={styles.restorePromptTextContainer}>
-                <Text style={styles.restorePromptTitle}>Đã cài lại app hoặc đổi máy?</Text>
+                <Text style={styles.restorePromptTitle}>Đã cài lại app hoặc cập nhật?</Text>
                 <Text style={styles.restorePromptDesc}>
-                  Nhấn vào đây để khôi phục lại danh sách thiết bị từ Ghi chú / Bộ nhớ tạm!
+                  Nhấn vào đây để nạp lại toàn bộ thiết bị từ thư mục "Trên iPhone &gt; Antigravity"!
                 </Text>
               </View>
               <ArrowRight color="#00f2fe" size={18} />
@@ -458,7 +457,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
           <View style={styles.guideCard}>
             <View style={styles.guideHeader}>
               <ShieldCheck color="#22c55e" size={18} />
-              <Text style={styles.guideTitle}>Hướng dẫn kích hoạt Remote Control</Text>
+              <Text style={styles.guideTitle}>Lưu trữ tự động trong Tệp iPhone</Text>
             </View>
             <View style={styles.stepRow}>
               <CheckCircle2 color="#38bdf8" size={15} style={styles.stepIcon} />
@@ -475,7 +474,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
             <View style={styles.stepRow}>
               <CheckCircle2 color="#38bdf8" size={15} style={styles.stepIcon} />
               <Text style={styles.stepText}>
-                3. Bấm nút <Text style={styles.bold}>Sao lưu Offline</Text> để copy mã cất vào Notes, khi cài lại chỉ cần 1 chạm để khôi phục!
+                3. App tự động tạo file <Text style={styles.bold}>antigravity_history.json</Text> trong thư mục <Text style={styles.bold}>Trên iPhone &gt; Antigravity</Text> để tự nạp lại khi cài lại app!
               </Text>
             </View>
           </View>
@@ -489,7 +488,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
         onScanSuccess={handleScanSuccess}
       />
 
-      {/* Local Backup & Restore Modal */}
+      {/* Local Files Backup & Restore Modal */}
       <BackupModal
         visible={backupModalVisible}
         onClose={() => setBackupModalVisible(false)}

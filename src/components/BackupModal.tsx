@@ -17,7 +17,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import {
   X,
-  HardDrive,
+  Folder,
   Copy,
   ClipboardPaste,
   ShieldCheck,
@@ -25,6 +25,9 @@ import {
   Sparkles,
   CheckCircle2,
   FileText,
+  HardDrive,
+  DownloadCloud,
+  FileCheck,
 } from 'lucide-react-native';
 import { StorageService } from '../services/StorageService';
 
@@ -49,6 +52,37 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
   };
 
+  const handleRestoreFromLocalFiles = async () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const result = await StorageService.restoreFromFileSystem();
+      onDataRestored();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Đã nạp từ Tệp iPhone! 🎉',
+        `Đã phục hồi thành công ${result.devicesCount} thiết bị từ file "antigravity_history.json" trong mục Trên iPhone.`,
+        [{ text: 'Đóng', onPress: onClose }]
+      );
+    } catch (e: any) {
+      Alert.alert('Không tìm thấy file', e.message || 'Chưa có file lưu trữ nào trong thư mục Antigravity.');
+    }
+  };
+
+  const handleSaveToFilesManually = async () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const devices = await StorageService.getDevices();
+      const path = await StorageService.saveToFileSystem(devices);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Đã lưu vào Tệp! 📁',
+        `Toàn bộ ${devices.length} thiết bị đã được ghi vào file "antigravity_history.json" trong thư mục Antigravity trên iPhone của bạn.`
+      );
+    } catch (e: any) {
+      Alert.alert('Lỗi lưu file', e.message || 'Không thể ghi file vào thư mục.');
+    }
+  };
+
   const handleExportBackupCode = async () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -56,8 +90,8 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       await Clipboard.setStringAsync(code);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
-        'Đã sao chép mã sao lưu! 📋',
-        'Toàn bộ lịch sử thiết bị đã được copy vào bộ nhớ tạm. Bạn có thể dán vào ứng dụng Ghi chú (Apple Notes) để lưu trữ.'
+        'Đã sao chép mã! 📋',
+        'Mã sao lưu đã được copy vào bộ nhớ tạm.'
       );
     } catch (e: any) {
       Alert.alert('Lỗi xuất mã', e.message || 'Không thể tạo mã sao lưu.');
@@ -69,7 +103,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     try {
       const text = await Clipboard.getStringAsync();
       if (!text || !text.trim()) {
-        Alert.alert('Bộ nhớ tạm trống', 'Hãy copy mã sao lưu (bắt đầu bằng AG_BACKUP:...) trước khi bấm khôi phục.');
+        Alert.alert('Bộ nhớ tạm trống', 'Hãy copy mã sao lưu trước khi bấm khôi phục.');
         return;
       }
 
@@ -83,13 +117,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         [{ text: 'Xong', onPress: onClose }]
       );
     } catch (e: any) {
-      Alert.alert('Mã không hợp lệ', 'Nội dung trong bộ nhớ tạm không phải là mã sao lưu hợp lệ của Antigravity.');
+      Alert.alert('Mã không hợp lệ', 'Nội dung trong bộ nhớ tạm không phải là mã sao lưu hợp lệ.');
     }
   };
 
   const handleImportBackupCode = async () => {
     if (!backupCodeInput.trim()) {
-      Alert.alert('Chưa có mã', 'Vui lòng dán mã sao lưu (bắt đầu bằng AG_BACKUP:...) vào ô bên dưới.');
+      Alert.alert('Chưa có mã', 'Vui lòng dán mã sao lưu vào ô bên dưới.');
       return;
     }
 
@@ -105,7 +139,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         [{ text: 'Xong', onPress: onClose }]
       );
     } catch (e: any) {
-      Alert.alert('Mã không hợp lệ', e.message || 'Không thể giải mã dữ liệu sao lưu.');
+      Alert.alert('Mã không hợp lệ', e.message || 'Không thể giải mã dữ liệu.');
     }
   };
 
@@ -134,8 +168,8 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         {/* Top Header */}
         <View style={styles.header}>
           <View style={styles.headerTitleRow}>
-            <HardDrive color="#00f2fe" size={22} />
-            <Text style={styles.headerTitle}>Sao lưu Cục bộ (Offline)</Text>
+            <Folder color="#00f2fe" size={22} />
+            <Text style={styles.headerTitle}>Lưu trữ Trong Tệp iPhone</Text>
           </View>
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
             <X color="#94a3b8" size={20} />
@@ -150,27 +184,53 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             {/* Info Card */}
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
-                <ShieldCheck color="#4ade80" size={18} />
-                <Text style={styles.infoTitle}>100% Cục bộ & Bảo mật trên máy</Text>
+                <Folder color="#38bdf8" size={20} />
+                <Text style={styles.infoTitle}>Thư mục "Trên iPhone &gt; Antigravity"</Text>
               </View>
               <Text style={styles.infoDesc}>
-                Dữ liệu đăng nhập lưu trữ hoàn toàn trên iPhone của bạn, không truyền lên bất kỳ máy chủ nào. Bạn có thể sao chép mã sao lưu để cất vào Ghi chú (Apple Notes) và khôi phục lại bất kỳ lúc nào sau khi cài lại app.
+                Ứng dụng tự động tạo và lưu trữ file <Text style={styles.boldWhite}>antigravity_history.json</Text> trực tiếp trong thư mục <Text style={styles.boldWhite}>Antigravity</Text> của ứng dụng <Text style={styles.boldWhite}>Tệp (Files)</Text> trên iPhone.
               </Text>
             </View>
 
-            {/* Quick 1-Tap Restore */}
+            {/* Primary Action: Read from Files Folder */}
+            <TouchableOpacity
+              style={styles.primaryFilesBtn}
+              onPress={handleRestoreFromLocalFiles}
+              activeOpacity={0.85}
+            >
+              <FileCheck color="#030712" size={22} />
+              <View style={styles.filesBtnTextCol}>
+                <Text style={styles.filesBtnTitle}>Nạp lại dữ liệu từ Tệp iPhone</Text>
+                <Text style={styles.filesBtnDesc}>
+                  Tự động đọc file antigravity_history.json trong máy
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Save to Files Button */}
+            <TouchableOpacity
+              style={styles.secondaryFilesBtn}
+              onPress={handleSaveToFilesManually}
+              activeOpacity={0.8}
+            >
+              <FileText color="#00f2fe" size={18} />
+              <Text style={styles.secondaryFilesBtnText}>Cập nhật lại file trong Tệp iPhone</Text>
+            </TouchableOpacity>
+
+            <View style={styles.dividerBox}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>TÙY CHỌN DỰ PHÒNG KHÁC</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            {/* Quick 1-Tap Clipboard Restore */}
             <TouchableOpacity
               style={styles.quickRestoreBtn}
               onPress={handleQuickRestoreFromClipboard}
               activeOpacity={0.85}
             >
-              <ClipboardPaste color="#030712" size={20} />
-              <View style={styles.quickRestoreTextCol}>
-                <Text style={styles.quickRestoreTitle}>Khôi phục từ Bộ nhớ tạm</Text>
-                <Text style={styles.quickRestoreDesc}>
-                  1 chạm nạp lại toàn bộ thiết bị nếu bạn vừa copy mã
-                </Text>
-              </View>
+              <ClipboardPaste color="#38bdf8" size={18} />
+              <Text style={styles.quickRestoreTitle}>Khôi phục từ Bộ nhớ tạm (Clipboard)</Text>
             </TouchableOpacity>
 
             {/* Export Code Button */}
@@ -179,19 +239,13 @@ export const BackupModal: React.FC<BackupModalProps> = ({
               onPress={handleExportBackupCode}
               activeOpacity={0.8}
             >
-              <Copy color="#00f2fe" size={18} />
-              <Text style={styles.exportBtnText}>Sao chép mã sao lưu ra Ghi chú</Text>
+              <Copy color="#94a3b8" size={16} />
+              <Text style={styles.exportBtnText}>Sao chép mã sao lưu</Text>
             </TouchableOpacity>
-
-            <View style={styles.dividerBox}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>HOẶC DÁN MÃ THỦ CÔNG</Text>
-              <View style={styles.dividerLine} />
-            </View>
 
             {/* Manual Code Input */}
             <View style={styles.section}>
-              <Text style={styles.inputLabel}>Nhập mã sao lưu</Text>
+              <Text style={styles.inputLabel}>Hoặc dán mã sao lưu thủ công</Text>
               <View style={styles.inputBox}>
                 <TextInput
                   style={styles.textInput}
@@ -218,17 +272,6 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                 <RefreshCw color="#ffffff" size={16} />
                 <Text style={styles.primaryBtnText}>Khôi phục từ mã</Text>
               </TouchableOpacity>
-            </View>
-
-            {/* Tip card */}
-            <View style={styles.tipCard}>
-              <Text style={styles.tipTitle}>💡 Mẹo khi cập nhật app:</Text>
-              <Text style={styles.tipText}>
-                • Trước khi xoá hoặc cài lại bản mới: Bấm nút <Text style={styles.bold}>"Sao chép mã sao lưu"</Text> ở trên và dán vào Apple Notes.
-              </Text>
-              <Text style={styles.tipText}>
-                • Sau khi cài xong app mới: Mở Notes copy lại mã đó → Mở app bấm <Text style={styles.bold}>"Khôi phục từ Bộ nhớ tạm"</Text> là xong!
-              </Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -281,7 +324,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 6,
+    marginBottom: 8,
   },
   infoTitle: {
     fontSize: 15,
@@ -291,37 +334,41 @@ const styles = StyleSheet.create({
   infoDesc: {
     fontSize: 13,
     color: '#94a3b8',
-    lineHeight: 19,
+    lineHeight: 20,
   },
-  quickRestoreBtn: {
+  boldWhite: {
+    color: '#38bdf8',
+    fontWeight: '700',
+  },
+  primaryFilesBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#00f2fe',
     borderRadius: 18,
     padding: 16,
     marginBottom: 12,
-    gap: 12,
+    gap: 14,
     shadowColor: '#00f2fe',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.25,
     shadowRadius: 12,
     elevation: 8,
   },
-  quickRestoreTextCol: {
+  filesBtnTextCol: {
     flex: 1,
   },
-  quickRestoreTitle: {
+  filesBtnTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: '#030712',
     marginBottom: 2,
   },
-  quickRestoreDesc: {
+  filesBtnDesc: {
     fontSize: 12,
     color: 'rgba(3, 7, 18, 0.75)',
     fontWeight: '500',
   },
-  exportBtn: {
+  secondaryFilesBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -333,7 +380,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
   },
-  exportBtnText: {
+  secondaryFilesBtnText: {
     color: '#00f2fe',
     fontSize: 14,
     fontWeight: '700',
@@ -354,6 +401,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 10,
     letterSpacing: 0.5,
+  },
+  quickRestoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#131b2e',
+    borderRadius: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 8,
+    marginBottom: 10,
+  },
+  quickRestoreTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#cbd5e1',
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    gap: 6,
+    marginBottom: 16,
+  },
+  exportBtnText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '600',
   },
   section: {
     marginBottom: 20,
@@ -398,29 +475,6 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     color: '#ffffff',
     fontSize: 14,
-    fontWeight: '700',
-  },
-  tipCard: {
-    backgroundColor: 'rgba(19, 27, 46, 0.6)',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  tipTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#facc15',
-    marginBottom: 8,
-  },
-  tipText: {
-    fontSize: 12,
-    color: '#94a3b8',
-    lineHeight: 18,
-    marginBottom: 6,
-  },
-  bold: {
-    color: '#f8fafc',
     fontWeight: '700',
   },
 });
