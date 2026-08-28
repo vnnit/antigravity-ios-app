@@ -5,8 +5,7 @@ const STORAGE_KEYS = {
   DEVICES: '@antigravity_devices_v1',
   LAST_CONNECTED: '@antigravity_last_device_v1',
   SETTINGS: '@antigravity_settings_v1',
-  CLOUD_TOKEN: '@antigravity_cloud_token_v1',
-  LAST_SYNC_TIME: '@antigravity_last_sync_v1',
+  LOCAL_BACKUP: '@antigravity_local_backup_v1',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -14,12 +13,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   keepAwakeEnabled: true,
   hapticFeedback: true,
   desktopMode: false,
-  autoCloudSync: false,
 };
 
 const BACKUP_PREFIX = 'AG_BACKUP:v1:';
-const GIST_FILENAME = 'antigravity_remote_backup.json';
-const GIST_DESCRIPTION = 'Antigravity Remote iOS - Device History & Settings Backup';
 
 const toBase64 = (str: string): string => {
   try {
@@ -86,9 +82,6 @@ export const StorageService = {
       await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(newDevices));
       await this.setLastConnectedDevice(updatedDevice);
 
-      // Auto cloud sync if enabled
-      this.triggerAutoCloudSync().catch(() => {});
-
       return updatedDevice;
     } catch (e) {
       console.error('Failed to save device:', e);
@@ -106,9 +99,6 @@ export const StorageService = {
       if (lastDevice && lastDevice.id === id) {
         await AsyncStorage.removeItem(STORAGE_KEYS.LAST_CONNECTED);
       }
-
-      // Auto cloud sync if enabled
-      this.triggerAutoCloudSync().catch(() => {});
     } catch (e) {
       console.error('Failed to delete device:', e);
     }
@@ -156,43 +146,6 @@ export const StorageService = {
     }
   },
 
-  async getCloudToken(): Promise<string> {
-    try {
-      return (await AsyncStorage.getItem(STORAGE_KEYS.CLOUD_TOKEN)) || '';
-    } catch {
-      return '';
-    }
-  },
-
-  async saveCloudToken(token: string): Promise<void> {
-    try {
-      if (token && token.trim()) {
-        await AsyncStorage.setItem(STORAGE_KEYS.CLOUD_TOKEN, token.trim());
-      } else {
-        await AsyncStorage.removeItem(STORAGE_KEYS.CLOUD_TOKEN);
-      }
-    } catch (e) {
-      console.error('Failed to save cloud token:', e);
-    }
-  },
-
-  async getLastSyncTime(): Promise<number | null> {
-    try {
-      const t = await AsyncStorage.getItem(STORAGE_KEYS.LAST_SYNC_TIME);
-      return t ? parseInt(t, 10) : null;
-    } catch {
-      return null;
-    }
-  },
-
-  async setLastSyncTime(timestamp: number): Promise<void> {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.LAST_SYNC_TIME, timestamp.toString());
-    } catch (e) {
-      console.error('Failed to set last sync time:', e);
-    }
-  },
-
   /**
    * Export all devices & settings to a portable backup JSON
    */
@@ -213,7 +166,7 @@ export const StorageService = {
   },
 
   /**
-   * Export backup as a Base64 code string for easy copying
+   * Export backup as a Base64 code string for 1-click copying to Notes / Clipboard
    */
   async exportBackupString(): Promise<string> {
     const payload = await this.exportBackupPayload();
@@ -223,7 +176,7 @@ export const StorageService = {
   },
 
   /**
-   * Import backup from JSON object or Base64 string
+   * Import backup from JSON string or Base64 code string
    */
   async importBackup(input: string | BackupData): Promise<{ devicesCount: number }> {
     let data: BackupData;
@@ -282,155 +235,6 @@ export const StorageService = {
     }
 
     return { devicesCount: mergedDevices.length };
-  },
-
-  /**
-   * Sync backup payload to GitHub Gist
-   */
-  async syncToGitHubGist(tokenOverride?: string): Promise<{ gistId: string; count: number }> {
-    const token = tokenOverride || (await this.getCloudToken());
-    if (!token || !token.trim()) {
-      throw new Error('Chưa có GitHub Token để đồng bộ đám mây.');
-    }
-
-    const payload = await this.exportBackupPayload();
-    const backupContent = JSON.stringify(payload, null, 2);
-
-    // 1. Search for existing gist
-    const listRes = await fetch('https://api.github.com/gists', {
-      headers: {
-        Authorization: `token ${token.trim()}`,
-        'User-Agent': 'Antigravity-iOS',
-      },
-    });
-
-    if (!listRes.ok) {
-      throw new Error(`Lỗi kết nối GitHub (${listRes.status}): Token không hợp lệ hoặc đã hết hạn.`);
-    }
-
-    const gists: any[] = await listRes.json();
-    const existingGist = gists.find(
-      (g) => g.files && g.files[GIST_FILENAME] !== undefined
-    );
-
-    let gistId = '';
-
-    if (existingGist) {
-      // Update existing gist
-      gistId = existingGist.id;
-      const patchRes = await fetch(`https://api.github.com/gists/${gistId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `token ${token.trim()}`,
-          'User-Agent': 'Antigravity-iOS',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          description: GIST_DESCRIPTION,
-          files: {
-            [GIST_FILENAME]: {
-              content: backupContent,
-            },
-          },
-        }),
-      });
-
-      if (!patchRes.ok) {
-        throw new Error(`Không thể cập nhật Gist (${patchRes.status}).`);
-      }
-    } else {
-      // Create new secret gist
-      const createRes = await fetch('https://api.github.com/gists', {
-        method: 'POST',
-        headers: {
-          Authorization: `token ${token.trim()}`,
-          'User-Agent': 'Antigravity-iOS',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          description: GIST_DESCRIPTION,
-          public: false,
-          files: {
-            [GIST_FILENAME]: {
-              content: backupContent,
-            },
-          },
-        }),
-      });
-
-      if (!createRes.ok) {
-        throw new Error(`Không thể tạo Gist mới (${createRes.status}).`);
-      }
-
-      const created = await createRes.json();
-      gistId = created.id;
-    }
-
-    await this.saveCloudToken(token.trim());
-    await this.setLastSyncTime(Date.now());
-
-    return { gistId, count: payload.devices.length };
-  },
-
-  /**
-   * Pull and restore backup from GitHub Gist
-   */
-  async syncFromGitHubGist(tokenOverride?: string): Promise<{ devicesCount: number; updatedAt: string }> {
-    const token = tokenOverride || (await this.getCloudToken());
-    if (!token || !token.trim()) {
-      throw new Error('Chưa có GitHub Token để khôi phục.');
-    }
-
-    const listRes = await fetch('https://api.github.com/gists', {
-      headers: {
-        Authorization: `token ${token.trim()}`,
-        'User-Agent': 'Antigravity-iOS',
-      },
-    });
-
-    if (!listRes.ok) {
-      throw new Error(`Lỗi kết nối GitHub (${listRes.status}): Token không hợp lệ.`);
-    }
-
-    const gists: any[] = await listRes.json();
-    const existingGist = gists.find(
-      (g) => g.files && g.files[GIST_FILENAME] !== undefined
-    );
-
-    if (!existingGist || !existingGist.files[GIST_FILENAME].raw_url) {
-      throw new Error('Không tìm thấy bản sao lưu Antigravity nào trên tài khoản GitHub này.');
-    }
-
-    // Fetch raw content
-    const rawRes = await fetch(existingGist.files[GIST_FILENAME].raw_url);
-    if (!rawRes.ok) {
-      throw new Error('Không thể tải nội dung bản sao lưu từ Gist.');
-    }
-
-    const backupJson: BackupData = await rawRes.json();
-    const result = await this.importBackup(backupJson);
-
-    await this.saveCloudToken(token.trim());
-    await this.setLastSyncTime(Date.now());
-
-    return {
-      devicesCount: result.devicesCount,
-      updatedAt: existingGist.updated_at,
-    };
-  },
-
-  async triggerAutoCloudSync(): Promise<void> {
-    try {
-      const settings = await this.getSettings();
-      if (settings.autoCloudSync) {
-        const token = await this.getCloudToken();
-        if (token) {
-          await this.syncToGitHubGist(token);
-        }
-      }
-    } catch {
-      // Background sync silent fail
-    }
   },
 
   /**

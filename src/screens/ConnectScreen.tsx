@@ -26,8 +26,8 @@ import {
   ShieldCheck,
   Smartphone,
   CheckCircle2,
-  Cloud,
-  RefreshCw,
+  HardDrive,
+  Copy,
 } from 'lucide-react-native';
 import { QRScannerModal } from '../components/QRScannerModal';
 import { BackupModal } from '../components/BackupModal';
@@ -166,12 +166,12 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
         if (clean.startsWith('AG_BACKUP:v1:')) {
           Alert.alert(
             'Phát hiện mã sao lưu 📋',
-            'Bạn vừa dán mã sao lưu dữ liệu. Nhấn "Kết nối ngay" để khôi phục lại toàn bộ danh sách thiết bị!',
+            'Bạn vừa dán mã sao lưu dữ liệu. Nhấn "Khôi phục dữ liệu ngay" để nạp lại toàn bộ thiết bị!',
             [{ text: 'Đồng ý' }]
           );
         }
       } else {
-        Alert.alert('Bộ nhớ tạm trống', 'Hãy sao chép link Remote Control trước khi dán.');
+        Alert.alert('Bộ nhớ tạm trống', 'Hãy sao chép link Remote Control hoặc mã sao lưu trước khi dán.');
       }
     } catch {
       // Ignore
@@ -247,7 +247,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 <Text style={styles.statusBadgeText}>AI Remote Client</Text>
               </View>
 
-              {/* Backup & Cloud Sync Header Button */}
+              {/* Local Backup Header Button */}
               <TouchableOpacity
                 style={styles.headerBackupBtn}
                 onPress={() => {
@@ -256,8 +256,8 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                 }}
                 activeOpacity={0.8}
               >
-                <Cloud color="#00f2fe" size={14} />
-                <Text style={styles.headerBackupBtnText}>Sao lưu & Khôi phục</Text>
+                <HardDrive color="#00f2fe" size={14} />
+                <Text style={styles.headerBackupBtnText}>Sao lưu Offline</Text>
               </TouchableOpacity>
             </View>
 
@@ -341,7 +341,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
                   }}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={styles.quickBackupLink}>Sao lưu đám mây</Text>
+                  <Text style={styles.quickBackupLink}>Sao lưu ra Notes</Text>
                 </TouchableOpacity>
               </View>
 
@@ -382,7 +382,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
               ))}
             </View>
           ) : (
-            /* Empty State with Cloud Restore Prompt */
+            /* Empty State with Quick Restore Prompt */
             <TouchableOpacity
               style={styles.restorePromptCard}
               onPress={() => {
@@ -392,12 +392,12 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
               activeOpacity={0.8}
             >
               <View style={styles.restorePromptIcon}>
-                <Cloud color="#00f2fe" size={24} />
+                <HardDrive color="#00f2fe" size={24} />
               </View>
               <View style={styles.restorePromptTextContainer}>
                 <Text style={styles.restorePromptTitle}>Đã cài lại app hoặc đổi máy?</Text>
                 <Text style={styles.restorePromptDesc}>
-                  Nhấn vào đây để tải lại toàn bộ lịch sử đăng nhập từ Đám mây!
+                  Nhấn vào đây để khôi phục lại danh sách thiết bị từ Ghi chú / Bộ nhớ tạm!
                 </Text>
               </View>
               <ArrowRight color="#00f2fe" size={18} />
@@ -475,7 +475,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
             <View style={styles.stepRow}>
               <CheckCircle2 color="#38bdf8" size={15} style={styles.stepIcon} />
               <Text style={styles.stepText}>
-                3. Bật <Text style={styles.bold}>Sao lưu đám mây</Text> để không bao giờ bị mất danh sách thiết bị khi cài lại app!
+                3. Bấm nút <Text style={styles.bold}>Sao lưu Offline</Text> để copy mã cất vào Notes, khi cài lại chỉ cần 1 chạm để khôi phục!
               </Text>
             </View>
           </View>
@@ -489,7 +489,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ onConnect }) => {
         onScanSuccess={handleScanSuccess}
       />
 
-      {/* Backup & Restore Modal */}
+      {/* Local Backup & Restore Modal */}
       <BackupModal
         visible={backupModalVisible}
         onClose={() => setBackupModalVisible(false)}

@@ -12,8 +12,6 @@ export interface AppSettings {
   keepAwakeEnabled: boolean;
   hapticFeedback: boolean;
   desktopMode: boolean;
-  cloudSyncToken?: string;
-  autoCloudSync?: boolean;
 }
 
 export interface ScanResult {
