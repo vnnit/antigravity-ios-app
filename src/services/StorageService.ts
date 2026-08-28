@@ -8,11 +8,13 @@ const STORAGE_KEYS = {
   DEVICES: '@antigravity_devices_v1',
   LAST_CONNECTED: '@antigravity_last_device_v1',
   SETTINGS: '@antigravity_settings_v1',
+  WEB_SESSIONS: '@antigravity_web_sessions_v1',
 };
 
 const KEYCHAIN_KEYS = {
   DEVICES_BACKUP: 'antigravity_keychain_devices_v1',
   SETTINGS_BACKUP: 'antigravity_keychain_settings_v1',
+  WEB_SESSIONS_BACKUP: 'antigravity_keychain_sessions_v1',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -459,5 +461,69 @@ export const StorageService = {
       url: `https://antigravity.google.com/remote?device=${encodeURIComponent(cleanInput)}`,
       deviceName: cleanInput,
     };
+  },
+
+  /**
+   * Save web localStorage and auth session data (saved in AsyncStorage & iOS Keychain)
+   */
+  async saveWebSession(originUrl: string, data: Record<string, string>): Promise<void> {
+    try {
+      if (!data || Object.keys(data).length === 0) return;
+      const key = originUrl.split('?')[0].toLowerCase();
+      
+      let allSessions: Record<string, Record<string, string>> = {};
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.WEB_SESSIONS);
+        if (stored) allSessions = JSON.parse(stored);
+      } catch {}
+
+      allSessions[key] = {
+        ...(allSessions[key] || {}),
+        ...data,
+      };
+
+      const serialized = JSON.stringify(allSessions);
+      await AsyncStorage.setItem(STORAGE_KEYS.WEB_SESSIONS, serialized);
+      
+      try {
+        await SecureStore.setItemAsync(KEYCHAIN_KEYS.WEB_SESSIONS_BACKUP, serialized, {
+          keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+        });
+      } catch (kcErr) {
+        console.warn('Could not save session to Keychain:', kcErr);
+      }
+    } catch (e) {
+      console.error('Failed to save web session:', e);
+    }
+  },
+
+  /**
+   * Retrieve saved web localStorage and auth session data
+   */
+  async getWebSession(originUrl: string): Promise<Record<string, string> | null> {
+    try {
+      const key = originUrl.split('?')[0].toLowerCase();
+      let allSessions: Record<string, Record<string, string>> = {};
+
+      try {
+        const stored = await AsyncStorage.getItem(STORAGE_KEYS.WEB_SESSIONS);
+        if (stored) allSessions = JSON.parse(stored);
+      } catch {}
+
+      if (!allSessions[key]) {
+        try {
+          const kcStored = await SecureStore.getItemAsync(KEYCHAIN_KEYS.WEB_SESSIONS_BACKUP);
+          if (kcStored) {
+            allSessions = JSON.parse(kcStored);
+            await AsyncStorage.setItem(STORAGE_KEYS.WEB_SESSIONS, kcStored);
+          }
+        } catch {}
+      }
+
+      return allSessions[key] || null;
+    } catch (e) {
+      console.error('Failed to get web session:', e);
+      return null;
+    }
   },
 };
