@@ -26,8 +26,9 @@ import {
   CheckCircle2,
   FileText,
   HardDrive,
-  DownloadCloud,
   FileCheck,
+  FolderOpen,
+  Key,
 } from 'lucide-react-native';
 import { StorageService } from '../services/StorageService';
 
@@ -52,6 +53,24 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     }
   };
 
+  const handlePickAndRestoreJson = async () => {
+    triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const result = await StorageService.pickAndRestoreJsonFile();
+      onDataRestored();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        'Khôi phục thành công! 🎉',
+        `Đã nạp ${result.devicesCount} thiết bị từ tệp "${result.fileName}".`,
+        [{ text: 'Đóng', onPress: onClose }]
+      );
+    } catch (e: any) {
+      if (e.message !== 'Đã hủy chọn tệp.') {
+        Alert.alert('Lỗi đọc tệp', e.message || 'Không thể giải mã tệp sao lưu JSON.');
+      }
+    }
+  };
+
   const handleRestoreFromLocalFiles = async () => {
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     try {
@@ -60,7 +79,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         'Đã nạp từ Tệp iPhone! 🎉',
-        `Đã phục hồi thành công ${result.devicesCount} thiết bị từ file "antigravity_history.json" trong mục Trên iPhone.`,
+        `Đã phục hồi thành công ${result.devicesCount} thiết bị từ file "antigravity_history.json".`,
         [{ text: 'Đóng', onPress: onClose }]
       );
     } catch (e: any) {
@@ -72,11 +91,11 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     triggerHaptic(Haptics.ImpactFeedbackStyle.Medium);
     try {
       const devices = await StorageService.getDevices();
-      const path = await StorageService.saveToFileSystem(devices);
+      await StorageService.saveToFileSystem(devices);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         'Đã lưu vào Tệp! 📁',
-        `Toàn bộ ${devices.length} thiết bị đã được ghi vào file "antigravity_history.json" trong thư mục Antigravity trên iPhone của bạn.`
+        `Toàn bộ ${devices.length} thiết bị đã được ghi vào file "antigravity_history.json" trong thư mục Antigravity trên iPhone.`
       );
     } catch (e: any) {
       Alert.alert('Lỗi lưu file', e.message || 'Không thể ghi file vào thư mục.');
@@ -169,7 +188,7 @@ export const BackupModal: React.FC<BackupModalProps> = ({
         <View style={styles.header}>
           <View style={styles.headerTitleRow}>
             <Folder color="#00f2fe" size={22} />
-            <Text style={styles.headerTitle}>Lưu trữ Trong Tệp iPhone</Text>
+            <Text style={styles.headerTitle}>Quản lý Tệp &amp; Khôi phục</Text>
           </View>
           <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
             <X color="#94a3b8" size={20} />
@@ -184,37 +203,46 @@ export const BackupModal: React.FC<BackupModalProps> = ({
             {/* Info Card */}
             <View style={styles.infoCard}>
               <View style={styles.infoRow}>
-                <Folder color="#38bdf8" size={20} />
-                <Text style={styles.infoTitle}>Thư mục "Trên iPhone &gt; Antigravity"</Text>
+                <Key color="#38bdf8" size={20} />
+                <Text style={styles.infoTitle}>Tự động ghi nhớ qua iOS Keychain</Text>
               </View>
               <Text style={styles.infoDesc}>
-                Ứng dụng tự động tạo và lưu trữ file <Text style={styles.boldWhite}>antigravity_history.json</Text> trực tiếp trong thư mục <Text style={styles.boldWhite}>Antigravity</Text> của ứng dụng <Text style={styles.boldWhite}>Tệp (Files)</Text> trên iPhone.
+                Lịch sử đăng nhập đã được khóa an toàn vào <Text style={styles.boldWhite}>Móc khóa bảo mật (iOS Keychain)</Text> và thư mục <Text style={styles.boldWhite}>Trên iPhone &gt; Antigravity</Text>. Dữ liệu sẽ tồn tại bền vững ngay cả khi bạn xóa app và cài lại!
               </Text>
             </View>
 
-            {/* Primary Action: Read from Files Folder */}
+            {/* Primary Action 1: Open Document Picker */}
             <TouchableOpacity
               style={styles.primaryFilesBtn}
-              onPress={handleRestoreFromLocalFiles}
+              onPress={handlePickAndRestoreJson}
               activeOpacity={0.85}
             >
-              <FileCheck color="#030712" size={22} />
+              <FolderOpen color="#030712" size={22} />
               <View style={styles.filesBtnTextCol}>
-                <Text style={styles.filesBtnTitle}>Nạp lại dữ liệu từ Tệp iPhone</Text>
+                <Text style={styles.filesBtnTitle}>Chọn file .json từ ứng dụng Tệp</Text>
                 <Text style={styles.filesBtnDesc}>
-                  Tự động đọc file antigravity_history.json trong máy
+                  Chọn file từ Tải về, iCloud Drive hoặc bất kỳ đâu
                 </Text>
               </View>
             </TouchableOpacity>
 
-            {/* Save to Files Button */}
+            {/* Primary Action 2: Read from App Folder */}
             <TouchableOpacity
               style={styles.secondaryFilesBtn}
+              onPress={handleRestoreFromLocalFiles}
+              activeOpacity={0.8}
+            >
+              <FileCheck color="#00f2fe" size={18} />
+              <Text style={styles.secondaryFilesBtnText}>Nạp từ thư mục Trên iPhone &gt; Antigravity</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionLinkBtn}
               onPress={handleSaveToFilesManually}
               activeOpacity={0.8}
             >
-              <FileText color="#00f2fe" size={18} />
-              <Text style={styles.secondaryFilesBtnText}>Cập nhật lại file trong Tệp iPhone</Text>
+              <FileText color="#94a3b8" size={16} />
+              <Text style={styles.actionLinkBtnText}>Ghi đè file antigravity_history.json vào Tệp</Text>
             </TouchableOpacity>
 
             <View style={styles.dividerBox}>
@@ -378,12 +406,25 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   secondaryFilesBtnText: {
     color: '#00f2fe',
     fontSize: 14,
     fontWeight: '700',
+  },
+  actionLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 6,
+    marginBottom: 16,
+  },
+  actionLinkBtnText: {
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: '600',
   },
   dividerBox: {
     flexDirection: 'row',

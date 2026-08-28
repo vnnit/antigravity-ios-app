@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
+import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import { RemoteDevice, AppSettings, BackupData } from '../types';
 
@@ -6,6 +8,11 @@ const STORAGE_KEYS = {
   DEVICES: '@antigravity_devices_v1',
   LAST_CONNECTED: '@antigravity_last_device_v1',
   SETTINGS: '@antigravity_settings_v1',
+};
+
+const KEYCHAIN_KEYS = {
+  DEVICES_BACKUP: 'antigravity_keychain_devices_v1',
+  SETTINGS_BACKUP: 'antigravity_keychain_settings_v1',
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -24,56 +31,81 @@ const getBackupFile = () => {
 
 export const StorageService = {
   /**
-   * Automatically synchronizes between AsyncStorage and the local "On My iPhone > Antigravity" folder (antigravity_history.json)
+   * Triple-layer storage loader:
+   * 1. AsyncStorage
+   * 2. iOS Secure Keychain (Persists even when app is deleted and reinstalled!)
+   * 3. Local Filesystem (antigravity_history.json in Files app)
    */
   async getDevices(): Promise<RemoteDevice[]> {
     try {
-      let devicesFromAsync: RemoteDevice[] = [];
-      const asyncData = await AsyncStorage.getItem(STORAGE_KEYS.DEVICES);
-      if (asyncData) {
-        devicesFromAsync = JSON.parse(asyncData);
+      const deviceMap = new Map<string, RemoteDevice>();
+
+      // 1. Load from AsyncStorage
+      try {
+        const asyncData = await AsyncStorage.getItem(STORAGE_KEYS.DEVICES);
+        if (asyncData) {
+          const parsed: RemoteDevice[] = JSON.parse(asyncData);
+          for (const d of parsed) {
+            if (d && d.url) deviceMap.set(d.url, d);
+          }
+        }
+      } catch (err) {
+        console.warn('AsyncStorage read error:', err);
       }
 
-      // Check the local Files folder (antigravity_history.json)
-      let devicesFromFile: RemoteDevice[] = [];
+      // 2. Load from iOS Keychain (Survives app deletion/reinstallation)
+      try {
+        const keychainData = await SecureStore.getItemAsync(KEYCHAIN_KEYS.DEVICES_BACKUP);
+        if (keychainData) {
+          const parsed: RemoteDevice[] = JSON.parse(keychainData);
+          for (const d of parsed) {
+            if (d && d.url) {
+              const existing = deviceMap.get(d.url);
+              if (!existing || (d.lastConnectedAt && d.lastConnectedAt > existing.lastConnectedAt)) {
+                deviceMap.set(d.url, d);
+              }
+            }
+          }
+        }
+      } catch (kcErr) {
+        console.warn('Keychain read error:', kcErr);
+      }
+
+      // 3. Load from local Filesystem folder (antigravity_history.json)
       try {
         const file = getBackupFile();
         if (file.exists) {
           const fileContent = await file.text();
           if (fileContent) {
             const parsed = JSON.parse(fileContent);
-            if (Array.isArray(parsed)) {
-              devicesFromFile = parsed;
-            } else if (parsed && Array.isArray(parsed.devices)) {
-              devicesFromFile = parsed.devices;
+            const list: RemoteDevice[] = Array.isArray(parsed)
+              ? parsed
+              : parsed.devices && Array.isArray(parsed.devices)
+              ? parsed.devices
+              : [];
+            for (const d of list) {
+              if (d && d.url) {
+                const existing = deviceMap.get(d.url);
+                if (!existing || (d.lastConnectedAt && d.lastConnectedAt > existing.lastConnectedAt)) {
+                  deviceMap.set(d.url, d);
+                }
+              }
             }
           }
         }
       } catch (fileErr) {
-        console.warn('Could not read from local Files directory:', fileErr);
-      }
-
-      // Merge both sources (deduplicating by url/id)
-      const deviceMap = new Map<string, RemoteDevice>();
-      for (const d of devicesFromFile) {
-        if (d && d.url) deviceMap.set(d.url, d);
-      }
-      for (const d of devicesFromAsync) {
-        if (d && d.url) deviceMap.set(d.url, d);
+        console.warn('Filesystem read error:', fileErr);
       }
 
       const mergedDevices = Array.from(deviceMap.values()).sort(
         (a, b) => b.lastConnectedAt - a.lastConnectedAt
       );
 
-      // If file had devices that AsyncStorage lost (e.g. after reinstall), persist back to AsyncStorage
-      if (mergedDevices.length > 0 && devicesFromAsync.length !== mergedDevices.length) {
+      // If we recovered data from Keychain / Files that was missing in AsyncStorage, sync back
+      if (mergedDevices.length > 0) {
         await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(mergedDevices));
-      }
-
-      // If file was missing, save merged to file
-      if (mergedDevices.length > 0 && devicesFromFile.length !== mergedDevices.length) {
-        this.saveToFileSystem(mergedDevices).catch(() => {});
+        await this.syncToKeychain(mergedDevices);
+        await this.saveToFileSystem(mergedDevices);
       }
 
       return mergedDevices;
@@ -120,7 +152,10 @@ export const StorageService = {
       await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(newDevices));
       await this.setLastConnectedDevice(updatedDevice);
 
-      // 2. Automatically save file to "On My iPhone > Antigravity" folder
+      // 2. Save to iOS Keychain (Persists across uninstalls)
+      await this.syncToKeychain(newDevices);
+
+      // 3. Save to Filesystem (On My iPhone > Antigravity)
       await this.saveToFileSystem(newDevices);
 
       return updatedDevice;
@@ -134,17 +169,29 @@ export const StorageService = {
     try {
       const devices = await this.getDevices();
       const filtered = devices.filter((d) => d.id !== id);
+
       await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(filtered));
+      await this.syncToKeychain(filtered);
+      await this.saveToFileSystem(filtered);
 
       const lastDevice = await this.getLastConnectedDevice();
       if (lastDevice && lastDevice.id === id) {
         await AsyncStorage.removeItem(STORAGE_KEYS.LAST_CONNECTED);
       }
-
-      // Update local file
-      await this.saveToFileSystem(filtered);
     } catch (e) {
       console.error('Failed to delete device:', e);
+    }
+  },
+
+  async syncToKeychain(devices: RemoteDevice[]): Promise<void> {
+    try {
+      await SecureStore.setItemAsync(
+        KEYCHAIN_KEYS.DEVICES_BACKUP,
+        JSON.stringify(devices),
+        { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK }
+      );
+    } catch (e) {
+      console.warn('Failed to save to Keychain:', e);
     }
   },
 
@@ -195,6 +242,7 @@ export const StorageService = {
    */
   async saveToFileSystem(devices: RemoteDevice[]): Promise<string> {
     try {
+      if (devices.length === 0) return '';
       const file = getBackupFile();
       const payload: BackupData = {
         version: 1,
@@ -212,12 +260,34 @@ export const StorageService = {
   },
 
   /**
-   * Reload and restore data directly from the iOS Files app folder (antigravity_history.json)
+   * Open iOS Document Picker to select any .json backup file from iCloud Drive, Downloads, or Files app
+   */
+  async pickAndRestoreJsonFile(): Promise<{ devicesCount: number; fileName: string }> {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/json', 'text/plain', '*/*'],
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      throw new Error('Đã hủy chọn tệp.');
+    }
+
+    const asset = result.assets[0];
+    const pickedFile = new File(asset.uri);
+    const content = await pickedFile.text();
+    const parsed = JSON.parse(content);
+    const importRes = await this.importBackup(parsed);
+
+    return { devicesCount: importRes.devicesCount, fileName: asset.name };
+  },
+
+  /**
+   * Reload data directly from the iOS Files app folder (antigravity_history.json)
    */
   async restoreFromFileSystem(): Promise<{ devicesCount: number; path: string }> {
     const file = getBackupFile();
     if (!file.exists) {
-      throw new Error(`Chưa tìm thấy file "${BACKUP_FILENAME}" trong thư mục Antigravity trên iPhone.`);
+      throw new Error(`Chưa tìm thấy file "${BACKUP_FILENAME}" trong thư mục Antigravity.`);
     }
 
     const content = await file.text();
@@ -319,7 +389,9 @@ export const StorageService = {
       (a, b) => b.lastConnectedAt - a.lastConnectedAt
     );
 
+    // Save across all 3 layers
     await AsyncStorage.setItem(STORAGE_KEYS.DEVICES, JSON.stringify(mergedDevices));
+    await this.syncToKeychain(mergedDevices);
     await this.saveToFileSystem(mergedDevices);
 
     if (data.lastConnectedDevice && data.lastConnectedDevice.url) {
